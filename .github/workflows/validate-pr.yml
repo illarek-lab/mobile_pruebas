@@ -1,0 +1,67 @@
+name: Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-folder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR changes
+        run: |
+          # Get ALL changed files (added, modified, deleted)
+          changed_files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          echo "Archivos modificados en este PR:"
+          echo "$changed_files"
+          echo ""
+
+          # Ignore workflow files (.github/) from the check
+          project_files=$(echo "$changed_files" | grep -v '^\.github/' || true)
+
+          if [ -z "$project_files" ]; then
+            echo "Solo se modificaron archivos de configuración (.github/). Saltando validación."
+            exit 0
+          fi
+
+          # Extract the top-level folders touched by this PR
+          folders=$(echo "$project_files" | cut -d'/' -f1 | sort -u)
+          folder_count=$(echo "$folders" | wc -l | tr -d ' ')
+
+          echo "Carpetas afectadas: $folders"
+          echo "Cantidad de carpetas: $folder_count"
+          echo ""
+
+          # Rule 1: PR must only touch ONE top-level folder
+          if [ "$folder_count" -gt 1 ]; then
+            echo "::error::Este PR modifica más de una carpeta ($folders). Cada PR solo debe modificar archivos dentro de su propia carpeta."
+            exit 1
+          fi
+
+          target_folder=$(echo "$folders" | head -1)
+
+          # Rule 2: The folder must start with c or C
+          if ! echo "$target_folder" | grep -qE '^[Cc]'; then
+            echo "::error::La carpeta '$target_folder' no comienza con 'C'. El nombre de la carpeta debe empezar con 'c' o 'C'."
+            exit 1
+          fi
+
+          echo "Carpeta válida: $target_folder"
+
+          # Rule 3: The folder must contain at least one PDF
+          pdf_match=$(echo "$project_files" | grep -iE '\.pdf$' || true)
+
+          if [ -z "$pdf_match" ]; then
+            echo "::error::La carpeta '$target_folder' no contiene ningún archivo PDF. Cada PR debe incluir al menos un PDF."
+            exit 1
+          fi
+
+          echo "Archivos PDF encontrados:"
+          echo "$pdf_match"
+          echo ""
+          echo "Validación exitosa."
